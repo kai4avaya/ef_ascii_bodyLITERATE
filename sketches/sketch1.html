@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Scratchpad</title>
+  <!-- Add favicon -->
+  <link rel="icon" href="favicon.png" type="image/png">
+  <!-- CodeMirror CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.css">
+  
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+    /* Toolbar fixed at the top */
+    #toolbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: #ddd;
+      padding: 5px;
+      z-index: 100;
+      display: flex;
+    }
+    #toolbar button {
+      margin-right: 5px;
+      font-size: 18px;
+      cursor: pointer;
+    }
+    /* Editor container below toolbar */
+    #editor-container {
+      position: absolute;
+      top: 40px;
+      bottom: 0;
+      left: 0;
+      right: 0;
+    }
+    /* CodeMirror fills its container and shows line numbers */
+    .CodeMirror {
+      height: 100%;
+    }
+    /* Canvas overlay – appended to CodeMirror wrapper */
+    #overlayCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 10;
+      pointer-events: none; /* toggled in JS based on mode */
+    }
+    
+    /* Modal dialog styles */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.4);
+    }
+    
+    .modal-content {
+      background-color: #fefefe;
+      margin: 10% auto;
+      padding: 20px;
+      border: 1px solid #888;
+      width: 80%;
+      max-height: 70vh;
+      overflow-y: auto;
+      border-radius: 5px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 10px;
+      margin-bottom: 15px;
+    }
+    
+    .modal-header h2 {
+      margin: 0;
+    }
+    
+    .close {
+      color: #aaa;
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    
+    .close:hover {
+      color: black;
+    }
+    
+    .drawing-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 15px;
+    }
+    
+    .drawing-item {
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 10px;
+      text-align: center;
+      position: relative;
+    }
+    
+    .drawing-preview {
+      width: 100%;
+      height: 120px;
+      object-fit: contain;
+      background-color: #f9f9f9;
+      margin-bottom: 8px;
+    }
+    
+    .drawing-controls {
+      display: flex;
+      justify-content: space-around;
+      margin-top: 8px;
+    }
+    
+    .drawing-controls button {
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+    
+    .no-drawings {
+      text-align: center;
+      padding: 20px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <!-- Toolbar with tool buttons and tooltips -->
+  <!-- T = Code Editor, ✏ = Freehand, ▢ = Square, ◯ = Circle, ➜ = Arrow, 🔲 = Select/Move/Delete -->
+  <div id="toolbar">
+    <button id="mode-write" data-mode="write" title="Code Editor">T</button>
+    <button id="mode-draw" data-mode="draw" title="Freehand Draw">✐</button>
+    <button id="mode-square" data-mode="square" title="Draw Square">▢</button>
+    <button id="mode-circle" data-mode="circle" title="Draw Circle">◯</button>
+    <button id="mode-line" data-mode="line" title="Draw Line">—</button>
+    <button id="mode-arrow" data-mode="arrow" title="Draw Arrow">➜</button>
+    <button id="mode-select" data-mode="select" title="Select/Move/Delete Shapes">⬚</button>
+    <button id="mode-erase" data-mode="erase" title="Erase Shapes">⌫</button>
+    <button id="screenshot" title="Download as Image">↧</button>
+    <button id="save-drawing" title="Save Current Drawing">⊞</button>
+    <button id="history" title="View Saved Drawings">☰</button>
+    <button id="mode-delete" data-mode="delete" title="Delete All">✖</button>
+  </div>
+
+  <!-- Modal for saved drawings history -->
+  <div id="history-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Saved Drawings</h2>
+        <span class="close">&times;</span>
+      </div>
+      <div id="drawings-container" class="drawing-grid">
+        <!-- Drawing entries will be added here -->
+      </div>
+    </div>
+  </div>
+  
+  <!-- Editor container for CodeMirror -->
+  <div id="editor-container">
+    <textarea id="code" name="code">
+<!-- Write or sketch your ideas here -->
+    </textarea>
+  </div>
+
+  <!-- CodeMirror Core and Required Modes -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.js"></script>
+  <!-- Extra modes for htmlmixed -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/xml/xml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/javascript/javascript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/css/css.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/htmlmixed/htmlmixed.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/markdown/markdown.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <script>
+    /************ CodeMirror Setup with LocalStorage Persistence ************/
+    const editor = CodeMirror.fromTextArea(document.getElementById('code'), {
+        lineNumbers: true,
+  mode: "markdown",
+  theme: "default",
+  lineWrapping: true,
+  extraKeys: {
+    "Enter": "newlineAndIndentContinueMarkdownList"
+  }
+    });
+    // Load saved text (if any)
+    const savedText = localStorage.getItem("codemirror-text");
+    if (savedText) {
+      editor.setValue(savedText);
+    }
+    // Persist changes to localStorage
+    editor.on("change", () => {
+      localStorage.setItem("codemirror-text", editor.getValue());
+    });
+
+    /************ Shapes and Canvas Setup ************/
+    let currentMode = 'write'; // Modes: write, draw, square, circle, line, arrow, select, erase
+    let shapes = [];           // Array to hold drawn shapes (each may have a .text property)
+    let currentShape = null;   // For freehand drawing (draw mode)
+    let isDrawing = false;     // True when drawing is in progress
+    let startX, startY;        // Starting coordinates for shape modes
+    let previewShape = null;   // For previewing shapes during drag
+    let eraserRadius = 10;     // Size of the eraser tool in pixels
+
+    // For selection mode:
+    let selectedShapes = [];      // Currently selected shapes
+    let draggingSelected = false; // True when dragging selected shapes
+    let selectionDragStart = null;// Starting point for dragging
+    let selRect = null;           // Rubber-band selection rectangle
+
+    // Append a canvas overlay inside CodeMirror's wrapper.
+    const codeMirrorWrapper = editor.getWrapperElement();
+    codeMirrorWrapper.style.position = 'relative';
+    const canvas = document.createElement('canvas');
+    canvas.id = 'overlayCanvas';
+    codeMirrorWrapper.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      canvas.width = codeMirrorWrapper.clientWidth;
+      canvas.height = codeMirrorWrapper.clientHeight;
+      editor.refresh();
+      render();
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Set pointer events: in "write" mode let CodeMirror handle them; otherwise, canvas takes events.
+    function updateCanvasPointer() {
+      canvas.style.pointerEvents = (currentMode === 'write') ? 'none' : 'auto';
+    }
+    updateCanvasPointer();
+
+    // Toolbar button click: update current mode, highlight button, and clear selection if not in select mode.
+    document.querySelectorAll('#toolbar button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentMode = btn.getAttribute('data-mode');
+        updateCanvasPointer();
+        document.querySelectorAll('#toolbar button').forEach(b => b.style.background = '');
+        btn.style.background = '#bbb';
+        
+        // Show tooltip for text editing when select mode is activated
+        if (currentMode === 'select') {
+          showTooltip("Tip: Double-click any shape to add text");
+        }
+        
+        if (currentMode !== 'select') {
+          selectedShapes = [];
+          selRect = null;
+          draggingSelected = false;
+        }
+        if (currentMode === 'write') {
+          editor.focus();
+        }
+      });
+    });
+
+    // Function to show temporary tooltip
+    function showTooltip(message) {
+      // Check if tooltip already exists
+      let tooltip = document.getElementById('canvas-tooltip');
+      if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'canvas-tooltip';
+        tooltip.style.position = 'fixed';
+        tooltip.style.top = '45px'; // Just below toolbar
+        tooltip.style.left = '50%';
+        tooltip.style.transform = 'translateX(-50%)';
+        tooltip.style.background = 'rgba(0, 0, 0, 0.7)';
+        tooltip.style.color = 'white';
+        tooltip.style.padding = '8px 12px';
+        tooltip.style.borderRadius = '4px';
+        tooltip.style.zIndex = '1000';
+        tooltip.style.fontSize = '14px';
+        tooltip.style.transition = 'opacity 0.3s';
+        document.body.appendChild(tooltip);
+      }
+      
+      // Set message and show tooltip
+      tooltip.textContent = message;
+      tooltip.style.opacity = '1';
+      
+      // Hide tooltip after delay
+      setTimeout(() => {
+        tooltip.style.opacity = '0';
+        // Remove from DOM after fade out
+        setTimeout(() => {
+          if (tooltip.parentNode) {
+            document.body.removeChild(tooltip);
+          }
+        }, 300);
+      }, 3000);
+    }
+
+    /************ Utility Functions for Shapes ************/
+    function getShapeBoundingBox(shape) {
+      let box;
+      if (shape.type === 'square') {
+        box = { x: shape.x, y: shape.y, width: shape.width, height: shape.height };
+      } else if (shape.type === 'circle') {
+        box = { x: shape.x - shape.radius, y: shape.y - shape.radius, width: shape.radius * 2, height: shape.radius * 2 };
+      } else if (shape.type === 'draw') {
+        const xs = shape.points.map(p => p.x);
+        const ys = shape.points.map(p => p.y);
+        box = {
+          x: Math.min(...xs),
+          y: Math.min(...ys),
+          width: Math.max(...xs) - Math.min(...xs),
+          height: Math.max(...ys) - Math.min(...ys)
+        };
+      } else if (shape.type === 'arrow' || shape.type === 'line') {
+        box = {
+          x: Math.min(shape.startX, shape.endX),
+          y: Math.min(shape.startY, shape.endY),
+          width: Math.abs(shape.endX - shape.startX),
+          height: Math.abs(shape.endY - shape.startY)
+        };
+      }
+      // Add left, right, top, bottom properties
+      box.left = box.x;
+      box.right = box.x + box.width;
+      box.top = box.y;
+      box.bottom = box.y + box.height;
+      return box;
+    }
+
+    // Returns the topmost shape under (x, y)
+    function getShapeAt(x, y) {
+      // Border detection threshold in pixels
+      const BORDER_THRESHOLD = 5;
+      
+      for (let i = shapes.length - 1; i >= 0; i--) {
+        const shape = shapes[i];
+        if (shape.type === 'square') {
+          // Check if point is near any of the four edges of the rectangle
+          const nearLeftEdge = Math.abs(x - shape.x) <= BORDER_THRESHOLD && 
+                              y >= shape.y && y <= shape.y + shape.height;
+          const nearRightEdge = Math.abs(x - (shape.x + shape.width)) <= BORDER_THRESHOLD && 
+                               y >= shape.y && y <= shape.y + shape.height;
+          const nearTopEdge = Math.abs(y - shape.y) <= BORDER_THRESHOLD && 
+                             x >= shape.x && x <= shape.x + shape.width;
+          const nearBottomEdge = Math.abs(y - (shape.y + shape.height)) <= BORDER_THRESHOLD && 
+                                x >= shape.x && x <= shape.x + shape.width;
+          
+          if (nearLeftEdge || nearRightEdge || nearTopEdge || nearBottomEdge) {
+            return shape;
+          }
+        } else if (shape.type === 'circle') {
+          // For circle, check if point is near the circumference
+          const dist = Math.hypot(x - shape.x, y - shape.y);
+          if (Math.abs(dist - shape.radius) <= BORDER_THRESHOLD) {
+            return shape;
+          }
+        } else if (shape.type === 'draw') {
+          // For freehand drawing, check if point is near any segment of the path
+          for (let j = 1; j < shape.points.length; j++) {
+            const p1 = shape.points[j-1];
+            const p2 = shape.points[j];
+            const dist = distanceToLine({x, y}, p1, p2);
+            if (dist <= BORDER_THRESHOLD) {
+              return shape;
+            }
+          }
+        } else if (shape.type === 'arrow' || shape.type === 'line') {
+          // For arrow/line, check if point is near the line
+          const dist = distanceToLine({x, y}, {x: shape.startX, y: shape.startY}, {x: shape.endX, y: shape.endY});
+          if (dist <= BORDER_THRESHOLD) {
+            return shape;
+          }
+        }
+      }
+      return null;
+    }
+
+    // Helper: distance from point p to line segment v-w.
+    function distanceToLine(p, v, w) {
+      const l2 = (w.x - v.x) ** 2 + (w.y - v.y) ** 2;
+      if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
+      let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+      t = Math.max(0, Math.min(1, t));
+      const proj = { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) };
+      return Math.hypot(p.x - proj.x, p.y - proj.y);
+    }
+
+    /************ Canvas Mouse Events ************/
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      // Handle eraser mode - show circular cursor and erase on drag
+      if (currentMode === 'erase') {
+        canvas.style.cursor = 'none'; // Hide default cursor
+        render(); // Re-render to clear previous eraser preview
+        
+        // Draw eraser cursor
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, eraserRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = 'red';
+        ctx.stroke();
+        ctx.restore();
+        
+        // If dragging, erase shapes
+        if (isDrawing) {
+          eraseShapesAt(x, y);
+        }
+        
+        return;
+      }
+
+      // Update cursor based on whether we're hovering over a shape's border
+      if (currentMode !== 'write') {
+        const hoverShape = getShapeAt(x, y);
+        if (hoverShape) {
+          // Use a move cursor when hovering over a shape's border
+          canvas.style.cursor = 'move';
+        } else {
+          // Use default cursor otherwise
+          canvas.style.cursor = 'default';
+        }
+      }
+      
+      if (draggingSelected && selectedShapes.length > 0) {
+        // Handle shape dragging
+        const dx = x - selectionDragStart.x;
+        const dy = y - selectionDragStart.y;
+        
+        selectedShapes.forEach(s => {
+          if (s.type === 'square' || s.type === 'circle') {
+            s.x = s.initialX + dx;
+            s.y = s.initialY + dy;
+          } else if (s.type === 'arrow' || s.type === 'line') {
+            s.startX = s.initialStartX + dx;
+            s.startY = s.initialStartY + dy;
+            s.endX = s.initialEndX + dx;
+            s.endY = s.initialEndY + dy;
+          } else if (s.type === 'draw') {
+            s.points = s.initialPoints.map(p => ({
+              x: p.x + dx,
+              y: p.y + dy
+            }));
+          }
+        });
+        render();
+        return;
+      }
+      
+      if (currentMode === 'draw' && isDrawing) {
+        const lastPoint = currentShape.points[currentShape.points.length - 1];
+        currentShape.points.push({x, y});
+        
+        ctx.beginPath();
+        ctx.moveTo(lastPoint.x, lastPoint.y);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      } else if ((currentMode === 'square' || currentMode === 'circle' || currentMode === 'arrow' || currentMode === 'line') && isDrawing) {
+        previewShape = { type: currentMode, startX, startY, endX: x, endY: y };
+        render();
+        drawPreview(previewShape);
+      } else if (currentMode === 'select' && selRect) {
+        // Update selection rectangle and find shapes within it
+        selRect.endX = x;
+        selRect.endY = y;
+        render();
+        drawSelectionRectangle(selRect);
+        
+        // Calculate selection bounds
+        const left = Math.min(selRect.startX, selRect.endX);
+        const right = Math.max(selRect.startX, selRect.endX);
+        const top = Math.min(selRect.startY, selRect.endY);
+        const bottom = Math.max(selRect.startY, selRect.endY);
+        
+        // Select shapes that intersect with the selection rectangle
+        selectedShapes = shapes.filter(shape => {
+          const box = getShapeBoundingBox(shape);
+          // Check if the boxes overlap
+          return !(box.left > right || 
+                  box.right < left || 
+                  box.top > bottom || 
+                  box.bottom < top);
+        });
+        
+        if (selectedShapes.length > 0) {
+          drawSelectedHighlights();
+        }
+      }
+    });
+
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      if (currentMode === 'write') {
+        return;
+      }
+      
+      // In erase mode, start erasing shapes
+      if (currentMode === 'erase') {
+        isDrawing = true; // We use the isDrawing flag for continuity
+        eraseShapesAt(x, y);
+        return;
+      }
+
+      // Check for shape selection in any non-write mode
+      const clickedShape = getShapeAt(x, y);
+      if (clickedShape && !isDrawing) {
+        // If we click a shape that's already selected, don't change selection
+        // If we click a shape that's not selected, select only that shape
+        if (!selectedShapes.includes(clickedShape)) {
+          selectedShapes = [clickedShape];
+        }
+        
+        draggingSelected = true;
+        selectionDragStart = { x, y };
+        
+        // Record initial positions for all selected shapes
+        selectedShapes.forEach(s => {
+          if (s.type === 'square' || s.type === 'circle') {
+            s.initialX = s.x;
+            s.initialY = s.y;
+          } else if (s.type === 'arrow' || s.type === 'line') {
+            s.initialStartX = s.startX;
+            s.initialStartY = s.startY;
+            s.initialEndX = s.endX;
+            s.initialEndY = s.endY;
+          } else if (s.type === 'draw') {
+            s.initialPoints = s.points.map(p => ({ x: p.x, y: p.y }));
+          }
+        });
+        render();
+        drawSelectedHighlights(); // Add blue highlight immediately
+        return;
+      }
+      
+      if (currentMode === 'draw') {
+        isDrawing = true;
+        currentShape = { type: 'draw', points: [{x, y}] };
+      } else if (['square', 'circle', 'arrow', 'line'].includes(currentMode)) {
+        isDrawing = true;
+        startX = x;
+        startY = y;
+      } else if (currentMode === 'select' && !clickedShape) {
+        // Start selection rectangle only if we clicked empty space
+        selectedShapes = [];
+        selRect = { startX: x, startY: y, endX: x, endY: y };
+      }
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      if (draggingSelected) {
+        draggingSelected = false;
+        saveState();
+        saveShapes();
+      }
+      
+      if (isDrawing) {
+        isDrawing = false;
+        if (currentMode === 'draw' && currentShape) {
+          shapes.push(currentShape);
+          currentShape = null;
+        } else if ((currentMode === 'square' || currentMode === 'circle' || currentMode === 'arrow' || currentMode === 'line') && previewShape) {
+          // Convert preview shape to final shape
+          if (currentMode === 'square') {
+            shapes.push({
+              type: 'square',
+              x: Math.min(previewShape.startX, previewShape.endX),
+              y: Math.min(previewShape.startY, previewShape.endY),
+              width: Math.abs(previewShape.endX - previewShape.startX),
+              height: Math.abs(previewShape.endY - previewShape.startY)
+            });
+          } else if (currentMode === 'circle') {
+            const centerX = (previewShape.startX + previewShape.endX) / 2;
+            const centerY = (previewShape.startY + previewShape.endY) / 2;
+            const radius = Math.hypot(previewShape.endX - previewShape.startX, 
+                                    previewShape.endY - previewShape.startY) / 2;
+            shapes.push({
+              type: 'circle',
+              x: centerX,
+              y: centerY,
+              radius: radius
+            });
+          } else if (currentMode === 'arrow') {
+            shapes.push({
+              type: 'arrow',
+              startX: previewShape.startX,
+              startY: previewShape.startY,
+              endX: previewShape.endX,
+              endY: previewShape.endY
+            });
+          } else if (currentMode === 'line') {
+            shapes.push({
+              type: 'line',
+              startX: previewShape.startX,
+              startY: previewShape.startY,
+              endX: previewShape.endX,
+              endY: previewShape.endY
+            });
+          }
+          previewShape = null;
+        } else if (currentMode === 'erase') {
+          // Finished erasing, render once more to remove eraser cursor
+          render();
+        }
+        saveState();
+        render();
+        saveShapes();
+      }
+      
+      // Clear selection rectangle if it exists
+      if (selRect) {
+        selRect = null;
+        render();
+      }
+    });
+
+    /************ Keyboard Events for Undo/Redo ************/
+    // Add these variables at the top with your other state variables
+let undoStack = [];
+let redoStack = [];
+
+// Function to save state for undo
+function saveState() {
+  redoStack = []; // Clear redo stack when new action is performed
+  undoStack.push(JSON.stringify(shapes));
+}
+
+// Function to handle undo
+function undo() {
+  if (undoStack.length > 0) {
+    redoStack.push(JSON.stringify(shapes));
+    shapes = JSON.parse(undoStack.pop());
+    render();
+  }
+}
+
+// Function to handle redo
+function redo() {
+  if (redoStack.length > 0) {
+    undoStack.push(JSON.stringify(shapes));
+    shapes = JSON.parse(redoStack.pop());
+    render();
+  }
+}
+
+// Add keyboard event listener for undo/redo
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey) { // metaKey for Mac
+    if (e.key === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        redo();
+      } else {
+        undo();
+      }
+    } else if (e.key === 'y') {
+      e.preventDefault();
+      redo();
+    }
+  }
+});
+
+    
+
+    /************ Keyboard Events for Deletion ************/
+    window.addEventListener("keydown", (e) => {
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedShapes.length > 0) {
+        // Only delete shapes if we're not in write mode (to avoid interfering with text editing)
+        if (currentMode !== "write") {
+          shapes = shapes.filter(s => !selectedShapes.includes(s));
+          selectedShapes = [];
+          saveState(); // Save state for undo/redo
+          saveShapes();
+          render();
+        }
+      }
+    });
+
+    /************* Delete ********************************************/
+    // Add this click handler for the delete all button
+document.getElementById('mode-delete').addEventListener('click', () => {
+  if (confirm('Do you want to save the current drawing before clearing?')) {
+    // Save current drawing to savedDrawings store
+    saveCurrentDrawingToHistory("Drawing " + new Date().toLocaleString());
+  }
+  
+  // Clear the canvas
+  shapes = [];
+  selectedShapes = [];
+  currentShape = null;
+  isDrawing = false;
+  previewShape = null;
+  selRect = null;
+  
+  // Clear the CodeMirror editor
+  editor.setValue('');
+  
+  // Clear the localStorage
+  localStorage.removeItem("codemirror-text");
+  
+  // Clear and reset IndexedDB shapes
+  if (db) {
+    const transaction = db.transaction("shapes", "readwrite");
+    const store = transaction.objectStore("shapes");
+    store.clear().onsuccess = function() {
+      console.log("Current drawing cleared");
+    };
+  }
+  
+  // Reset undo/redo stacks
+  undoStack = [];
+  redoStack = [];
+  
+  // Render the empty canvas
+  render();
+});
+
+// Function to save current drawing to history
+function saveCurrentDrawingToHistory(name) {
+  if (!db || shapes.length === 0) return; // Don't save empty drawings
+  
+  const transaction = db.transaction("shapes", "readonly");
+  const store = transaction.objectStore("shapes");
+  const request = store.getAll();
+  
+  request.onsuccess = function(event) {
+    const currentShapes = event.target.result;
+    
+    // Create a saved drawing entry with timestamp
+    const savedDrawing = {
+      name: name,
+      shapes: JSON.parse(JSON.stringify(currentShapes)), // Deep copy
+      timestamp: new Date().getTime(),
+      preview: canvas.toDataURL('image/png', 0.5) // Store a preview image
+    };
+    
+    // Save to savedDrawings store
+    const saveTransaction = db.transaction("savedDrawings", "readwrite");
+    const saveStore = saveTransaction.objectStore("savedDrawings");
+    saveStore.add(savedDrawing);
+  };
+}
+
+/******************* SCREENSHOT FUNCTIONALITY *******************/
+
+// Screenshot functionality
+document.getElementById('screenshot').addEventListener('click', function() {
+  console.log('screenshot button clicked');
+  
+  // Create a temporary canvas to combine everything
+  const tempCanvas = document.createElement('canvas');
+  const tempCtx = tempCanvas.getContext('2d');
+  
+  // Set the canvas size to match the CodeMirror wrapper
+  tempCanvas.width = codeMirrorWrapper.clientWidth;
+  tempCanvas.height = codeMirrorWrapper.clientHeight;
+  
+  // First draw a white background
+  tempCtx.fillStyle = 'white';
+  tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+  
+  // Then try to capture the CodeMirror content
+  try {
+    // Use html2canvas to capture the CodeMirror content
+    html2canvas(codeMirrorWrapper, {
+      backgroundColor: null,
+      scale: 1,
+      logging: true,
+      ignoreElements: (element) => element.id === 'overlayCanvas'
+    }).then(function(editorCanvas) {
+      // Draw the editor content
+      tempCtx.drawImage(editorCanvas, 0, 0);
+      
+      // Then draw the canvas content (drawings) on top
+      tempCtx.drawImage(canvas, 0, 0);
+      
+      // Get the image data
+      const imageData = tempCanvas.toDataURL('image/png');
+      
+      // Send the image data to the parent window
+      window.parent.postMessage({ type: 'download-screenshot', imageData }, '*');
+    });
+  } catch (error) {
+    console.error('Error capturing editor:', error);
+    
+    // Fallback: just draw the canvas content
+    tempCtx.drawImage(canvas, 0, 0);
+    
+    // Get the image data
+    const imageData = tempCanvas.toDataURL('image/png');
+    
+    // Send the image data to the parent window
+    window.parent.postMessage({ type: 'download-screenshot', imageData }, '*');
+  }
+});
+
+    /************ Double Click for Text Editing on Shapes ************/
+    canvas.addEventListener("dblclick", (e) => {
+  if (currentMode !== "write") {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const shape = getShapeAt(x, y);
+    if (shape) { // Allow text editing for any shape type
+      showTextEditor(shape);
+    }
+  }
+});
+
+function showTextEditor(shape) {
+  const box = getShapeBoundingBox(shape);
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = shape.text || "";
+  input.style.position = "absolute";
+  input.style.zIndex = 200;
+  const centerX = box.x + box.width / 2;
+  const centerY = box.y + box.height / 2;
+  let newWidth = Math.max(box.width, 100); // Increased minimum width
+  let newHeight = 24; // Slightly larger height
+  
+  // Style the input to be more visible
+  input.style.width = newWidth + "px";
+  input.style.height = newHeight + "px";
+  input.style.left = (centerX - newWidth / 2) + "px";
+  input.style.top = (centerY - newHeight / 2) + "px";
+  input.style.textAlign = "center";
+  input.style.fontSize = "14px";
+  input.style.border = "1px solid #3498db"; // Blue border
+  input.style.outline = "none";
+  input.style.background = "rgba(255, 255, 255, 0.9)"; // Semi-transparent white
+  input.style.padding = "2px 5px";
+  input.style.borderRadius = "3px";
+  input.placeholder = "Type text here..."; // Placeholder text
+  
+  codeMirrorWrapper.appendChild(input);
+  input.focus();
+  input.select(); // Select all text on focus
+
+  // Real-time text update
+  input.addEventListener("input", () => {
+    shape.text = input.value;
+    render();
+  });
+
+  let isEditing = true;
+
+  function finishEditing() {
+    if (!isEditing) return;
+    isEditing = false;
+    
+    if (input.parentNode) {
+      codeMirrorWrapper.removeChild(input);
+    }
+    saveState(); // Save state after text edit
+    render();
+    saveShapes();
+  }
+
+  input.addEventListener("blur", finishEditing);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      finishEditing();
+    }
+    if (e.key === "Escape") {
+      isEditing = false;
+      shape.text = "";
+      if (input.parentNode) {
+        codeMirrorWrapper.removeChild(input);
+      }
+      render();
+    }
+  });
+}
+
+function wrapText(ctx, text, maxWidth) {
+  const words = text.split(' ');
+  const lines = [];
+  let currentLine = words[0];
+
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i];
+    const width = ctx.measureText(currentLine + " " + word).width;
+    if (width < maxWidth) {
+      currentLine += " " + word;
+    } else {
+      lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  lines.push(currentLine);
+  return lines;
+}
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  shapes.forEach(shape => {
+    ctx.beginPath();
+    if (shape.type === 'square') {
+      ctx.rect(shape.x, shape.y, shape.width, shape.height);
+    } else if (shape.type === 'circle') {
+      ctx.arc(shape.x, shape.y, shape.radius, 0, Math.PI * 2);
+    } else if (shape.type === 'draw') {
+      ctx.moveTo(shape.points[0].x, shape.points[0].y);
+      for (let i = 1; i < shape.points.length; i++) {
+        ctx.lineTo(shape.points[i].x, shape.points[i].y);
+      }
+    } else if (shape.type === 'arrow' || shape.type === 'line') {
+      ctx.moveTo(shape.startX, shape.startY);
+      ctx.lineTo(shape.endX, shape.endY);
+    }
+    ctx.stroke();
+
+    // Draw arrow heads if it's an arrow
+    if (shape.type === 'arrow') {
+      const angle = Math.atan2(shape.endY - shape.startY, shape.endX - shape.startX);
+      const headLength = 10;
+      const arrowAngle = Math.PI / 6;
+      ctx.beginPath();
+      ctx.moveTo(shape.endX, shape.endY);
+      ctx.lineTo(shape.endX - headLength * Math.cos(angle - arrowAngle), shape.endY - headLength * Math.sin(angle - arrowAngle));
+      ctx.moveTo(shape.endX, shape.endY);
+      ctx.lineTo(shape.endX - headLength * Math.cos(angle + arrowAngle), shape.endY - headLength * Math.sin(angle + arrowAngle));
+      ctx.stroke();
+    }
+
+    // Render text if it exists with wrapping
+    if (shape.text) {
+      ctx.save();
+      ctx.font = "bold 14px sans-serif"; // Make text bold
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      
+      let box = getShapeBoundingBox(shape);
+      const maxWidth = shape.type === 'circle' ? shape.radius * 1.8 : box.width - 10;
+      const lines = wrapText(ctx, shape.text, maxWidth);
+      
+      const lineHeight = 18;
+      const totalHeight = lines.length * lineHeight;
+      const startY = box.y + (box.height - totalHeight) / 2;
+      
+      // Draw text with white background for better readability
+      lines.forEach((line, index) => {
+        const textY = startY + lineHeight * index + lineHeight / 2;
+        const textWidth = ctx.measureText(line).width;
+        
+        // Draw semi-transparent background
+        ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+        ctx.fillRect(
+          box.x + box.width / 2 - textWidth / 2 - 4,
+          textY - lineHeight / 2,
+          textWidth + 8,
+          lineHeight
+        );
+        
+        // Draw text
+        ctx.fillStyle = "#000";
+        ctx.fillText(line, 
+          box.x + box.width / 2, 
+          textY);
+      });
+      
+      ctx.restore();
+    }
+  });
+
+  // Draw selection highlights if in select mode
+  if (currentMode === 'select') {
+    if (selRect) {
+      drawSelectionRectangle(selRect);
+    }
+    if (selectedShapes.length > 0) {
+      drawSelectedHighlights();
+    }
+  }
+  // Draw selection highlights in any mode except 'write'
+  else if (currentMode !== 'write' && selectedShapes.length > 0) {
+    drawSelectedHighlights();
+  }
+}
+
+    /************ Drawing and Preview Rendering ************/
+    function drawPreview(preview) {
+      if (!preview) return;
+      ctx.save();
+      ctx.setLineDash([5, 3]);
+      ctx.beginPath();
+      if (preview.type === 'square') {
+        ctx.rect(
+          Math.min(preview.startX, preview.endX),
+          Math.min(preview.startY, preview.endY),
+          Math.abs(preview.endX - preview.startX),
+          Math.abs(preview.endY - preview.startY)
+        );
+      } else if (preview.type === 'circle') {
+        // Calculate center point and radius based on midpoint between start and end
+        const centerX = (preview.startX + preview.endX) / 2;
+        const centerY = (preview.startY + preview.endY) / 2;
+        const radius = Math.hypot(preview.endX - preview.startX, preview.endY - preview.startY) / 2;
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      } else if (preview.type === 'arrow') {
+        ctx.moveTo(preview.startX, preview.startY);
+        ctx.lineTo(preview.endX, preview.endY);
+        const angle = Math.atan2(preview.endY - preview.startY, preview.endX - preview.startX);
+        const headLength = 10;
+        const arrowAngle = Math.PI / 6;
+        ctx.moveTo(preview.endX, preview.endY);
+        ctx.lineTo(preview.endX - headLength * Math.cos(angle - arrowAngle), preview.endY - headLength * Math.sin(angle - arrowAngle));
+        ctx.moveTo(preview.endX, preview.endY);
+        ctx.lineTo(preview.endX - headLength * Math.cos(angle + arrowAngle), preview.endY - headLength * Math.sin(angle + arrowAngle));
+      } else if (preview.type === 'line') {
+        ctx.moveTo(preview.startX, preview.startY);
+        ctx.lineTo(preview.endX, preview.endY);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawSelectionRectangle(rect) {
+      ctx.save();
+      ctx.setLineDash([5, 3]);
+      ctx.strokeStyle = 'blue';
+      ctx.beginPath();
+      const left = Math.min(rect.startX, rect.endX);
+      const top = Math.min(rect.startY, rect.endY);
+      const width = Math.abs(rect.endX - rect.startX);
+      const height = Math.abs(rect.endY - rect.startY);
+      ctx.rect(left, top, width, height);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawSelectedHighlights() {
+      ctx.save();
+      ctx.setLineDash([5, 3]);
+      ctx.strokeStyle = 'blue';
+      ctx.lineWidth = 2; // Make the highlight a bit thicker
+      
+      selectedShapes.forEach(s => {
+        ctx.beginPath();
+        if (s.type === 'square') {
+          // Draw the rectangle border
+          ctx.rect(s.x, s.y, s.width, s.height);
+        } else if (s.type === 'circle') {
+          // Draw the circle border
+          ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+        } else if (s.type === 'draw') {
+          // Draw the freehand path
+          ctx.moveTo(s.points[0].x, s.points[0].y);
+          for (let i = 1; i < s.points.length; i++) {
+            ctx.lineTo(s.points[i].x, s.points[i].y);
+          }
+        } else if (s.type === 'arrow' || s.type === 'line') {
+          // Draw the arrow line
+          ctx.moveTo(s.startX, s.startY);
+          ctx.lineTo(s.endX, s.endY);
+          
+          // Draw the arrow head
+          const angle = Math.atan2(s.endY - s.startY, s.endX - s.startX);
+          const headLength = 10;
+          const arrowAngle = Math.PI / 6;
+          ctx.moveTo(s.endX, s.endY);
+          ctx.lineTo(s.endX - headLength * Math.cos(angle - arrowAngle), s.endY - headLength * Math.sin(angle - arrowAngle));
+          ctx.moveTo(s.endX, s.endY);
+          ctx.lineTo(s.endX - headLength * Math.cos(angle + arrowAngle), s.endY - headLength * Math.sin(angle + arrowAngle));
+        }
+        ctx.stroke();
+      });
+      
+      ctx.restore();
+    }
+
+    /************ IndexedDB Persistence for Shapes ************/
+    let db;
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open("ScratchpadDB", 2); // Version 2 for new store
+        request.onupgradeneeded = function(event) {
+          db = event.target.result;
+          if (!db.objectStoreNames.contains("shapes")) {
+            db.createObjectStore("shapes", { keyPath: "id", autoIncrement: true });
+          }
+          // Create savedDrawings store if it doesn't exist
+          if (!db.objectStoreNames.contains("savedDrawings")) {
+            const savedDrawingsStore = db.createObjectStore("savedDrawings", { keyPath: "id", autoIncrement: true });
+            // Add a timestamp index for sorting
+            savedDrawingsStore.createIndex("timestamp", "timestamp", { unique: false });
+          }
+        };
+        request.onsuccess = function(event) {
+          db = event.target.result;
+          resolve(db);
+        };
+        request.onerror = function(event) {
+          reject("IndexedDB error");
+        };
+      });
+    }
+
+    function saveShapes() {
+      if (!db) return;
+      const transaction = db.transaction("shapes", "readwrite");
+      const store = transaction.objectStore("shapes");
+      const clearRequest = store.clear();
+      clearRequest.onsuccess = function() {
+        shapes.forEach(shape => store.add(shape));
+      };
+    }
+
+    function loadShapes() {
+      if (!db) return;
+      const transaction = db.transaction("shapes", "readonly");
+      const store = transaction.objectStore("shapes");
+      const request = store.getAll();
+      request.onsuccess = function(event) {
+        shapes = event.target.result;
+        
+        // If no shapes in DB and premadeSketch has items, load the premade sketch
+        if (shapes.length === 0 && premadeSketch && premadeSketch.length > 0) {
+          shapes = premadeSketch;
+          // Save premade shapes to DB
+          const saveTransaction = db.transaction("shapes", "readwrite");
+          const saveStore = saveTransaction.objectStore("shapes");
+          premadeSketch.forEach(shape => saveStore.add(shape));
+        }
+        
+        render();
+      };
+    }
+
+    // Define a premadeSketch array - add shapes here to auto-load when DB is empty
+    // TIP: you can create a shape with the editor, then open indexdb dev tools, copy that object, then paste it here to auto-load when the page is reloaded
+    const premadeSketch = [
+  //  {
+  //       type: 'square',
+  //       x: 100,
+  //       y: 100,
+  //       width: 200,
+  //       height: 150,
+  //       text: 'My Square'
+  //     },
+  //     // Circle example
+  //     {
+  //       type: 'circle',
+  //       x: 350,
+  //       y: 200,
+  //       radius: 75,
+  //       text: 'My Circle'
+  //     }
+
+      // Leave empty to disable auto-loading, or add shapes like:
+      /*
+      // Square example
+      {
+        type: 'square',
+        x: 100,
+        y: 100,
+        width: 200,
+        height: 150,
+        text: 'My Square'
+      },
+      // Circle example
+      {
+        type: 'circle',
+        x: 350,
+        y: 200,
+        radius: 75,
+        text: 'My Circle'
+      }
+      */
+    ];
+
+    openDB().then(() => { loadShapes(); }).catch(console.error);
+
+    // Add function to erase shapes at coordinates
+    function eraseShapesAt(x, y) {
+      let wasErased = false;
+      
+      // Filter shapes to keep only those not under the eraser
+      shapes = shapes.filter(shape => {
+        // Use getShapeAt logic but with eraser radius
+        if (shape.type === 'square') {
+          // Check if eraser circle overlaps with rectangle
+          // Simple check - if center of eraser is within eraserRadius distance from rectangle edges
+          const nearLeftEdge = Math.abs(x - shape.x) <= eraserRadius && 
+                              y >= shape.y - eraserRadius && y <= shape.y + shape.height + eraserRadius;
+          const nearRightEdge = Math.abs(x - (shape.x + shape.width)) <= eraserRadius && 
+                               y >= shape.y - eraserRadius && y <= shape.y + shape.height + eraserRadius;
+          const nearTopEdge = Math.abs(y - shape.y) <= eraserRadius && 
+                             x >= shape.x - eraserRadius && x <= shape.x + shape.width + eraserRadius;
+          const nearBottomEdge = Math.abs(y - (shape.y + shape.height)) <= eraserRadius && 
+                                x >= shape.x - eraserRadius && x <= shape.x + shape.width + eraserRadius;
+          
+          // Also check if eraser is inside the rectangle
+          const insideRect = x >= shape.x && x <= shape.x + shape.width && 
+                            y >= shape.y && y <= shape.y + shape.height;
+          
+          if (nearLeftEdge || nearRightEdge || nearTopEdge || nearBottomEdge || insideRect) {
+            wasErased = true;
+            return false; // Don't keep this shape
+          }
+        } else if (shape.type === 'circle') {
+          // For circle, check if eraser circle intersects with shape circle
+          const dist = Math.hypot(x - shape.x, y - shape.y);
+          if (dist <= shape.radius + eraserRadius) {
+            wasErased = true;
+            return false; // Don't keep this shape
+          }
+        } else if (shape.type === 'draw') {
+          // For freehand drawing, check if eraser is near any segment
+          for (let j = 1; j < shape.points.length; j++) {
+            const p1 = shape.points[j-1];
+            const p2 = shape.points[j];
+            const dist = distanceToLine({x, y}, p1, p2);
+            if (dist <= eraserRadius) {
+              wasErased = true;
+              return false; // Don't keep this shape
+            }
+          }
+        } else if (shape.type === 'arrow' || shape.type === 'line') {
+          // For arrow/line, check if eraser is near the line
+          const dist = distanceToLine({x, y}, {x: shape.startX, y: shape.startY}, {x: shape.endX, y: shape.endY});
+          if (dist <= eraserRadius) {
+            wasErased = true;
+            return false; // Don't keep this shape
+          }
+        }
+        return true; // Keep this shape
+      });
+      
+      if (wasErased) {
+        saveState(); // Save state for undo
+        saveShapes(); // Update storage
+        render();
+      }
+    }
+
+    // Get the history button and modal
+    const historyBtn = document.getElementById('history');
+    const historyModal = document.getElementById('history-modal');
+    const closeBtn = historyModal.querySelector('.close');
+    const drawingsContainer = document.getElementById('drawings-container');
+    const saveDrawingBtn = document.getElementById('save-drawing');
+    
+    // Save current drawing when save button is clicked
+    saveDrawingBtn.addEventListener('click', () => {
+      saveCurrentDrawing();
+    });
+    
+    // Show modal when history button is clicked
+    historyBtn.addEventListener('click', () => {
+      loadSavedDrawings();
+      historyModal.style.display = 'block';
+    });
+    
+    // Close modal when X is clicked
+    closeBtn.addEventListener('click', () => {
+      historyModal.style.display = 'none';
+    });
+    
+    // Close modal when clicking outside the content
+    window.addEventListener('click', (e) => {
+      if (e.target === historyModal) {
+        historyModal.style.display = 'none';
+      }
+    });
+    
+    // Function to load saved drawings from IndexedDB
+    function loadSavedDrawings() {
+      if (!db) return;
+      
+      const transaction = db.transaction("savedDrawings", "readonly");
+      const store = transaction.objectStore("savedDrawings");
+      const index = store.index("timestamp");
+      
+      // Get all saved drawings sorted by timestamp (newest first)
+      const request = index.openCursor(null, "prev");
+      
+      // Clear container
+      drawingsContainer.innerHTML = '';
+      let hasDrawings = false;
+      
+      request.onsuccess = function(event) {
+        const cursor = event.target.result;
+        if (cursor) {
+          hasDrawings = true;
+          const drawing = cursor.value;
+          
+          // Create drawing item element
+          const drawingItem = document.createElement('div');
+          drawingItem.className = 'drawing-item';
+          drawingItem.innerHTML = `
+            <img class="drawing-preview" src="${drawing.preview}" alt="Drawing Preview">
+            <div class="drawing-name">${drawing.name}</div>
+            <div class="drawing-controls">
+              <button class="load-btn">Load</button>
+              <button class="delete-btn">Delete</button>
+            </div>
+          `;
+          
+          // Set up load button
+          drawingItem.querySelector('.load-btn').addEventListener('click', () => {
+            loadDrawing(drawing);
+            historyModal.style.display = 'none';
+          });
+          
+          // Set up delete button
+          drawingItem.querySelector('.delete-btn').addEventListener('click', () => {
+            if (confirm(`Delete "${drawing.name}"?`)) {
+              deleteDrawing(drawing.id);
+              drawingItem.remove();
+              
+              // Check if container is empty after deletion
+              if (drawingsContainer.children.length === 0) {
+                drawingsContainer.innerHTML = '<div class="no-drawings">No saved drawings</div>';
+              }
+            }
+          });
+          
+          drawingsContainer.appendChild(drawingItem);
+          cursor.continue();
+        } else if (!hasDrawings) {
+          // Display message if no drawings
+          drawingsContainer.innerHTML = '<div class="no-drawings">No saved drawings</div>';
+        }
+      };
+    }
+    
+    // Function to load a drawing into the canvas
+    function loadDrawing(drawing) {
+      // Clear current drawing
+      shapes = [];
+      
+      // Load shapes from saved drawing
+      shapes = JSON.parse(JSON.stringify(drawing.shapes));
+      
+      // Clear current DB store
+      const transaction = db.transaction("shapes", "readwrite");
+      const store = transaction.objectStore("shapes");
+      store.clear().onsuccess = function() {
+        // Add shapes to DB
+        shapes.forEach(shape => {
+          // Remove any existing ID to avoid conflicts
+          delete shape.id;
+          store.add(shape);
+        });
+        
+        // Reset undo/redo stacks
+        undoStack = [];
+        redoStack = [];
+        
+        // Render
+        render();
+      };
+    }
+    
+    // Function to delete a drawing from history
+    function deleteDrawing(id) {
+      const transaction = db.transaction("savedDrawings", "readwrite");
+      const store = transaction.objectStore("savedDrawings");
+      store.delete(id);
+    }
+    
+    // Save drawing button in the modal
+    function saveCurrentDrawing() {
+      const name = prompt("Enter a name for this drawing", "Drawing " + new Date().toLocaleString());
+      if (name) {
+        saveCurrentDrawingToHistory(name);
+        // Reload drawings list
+        loadSavedDrawings();
+      }
+    }
+  </script>
+</body>
+</html>
